@@ -1,6 +1,22 @@
 //
 // Support functions for system calls that involve file descriptors.
 //
+// fs.c 中的 writei 提供了对 inode 数据块的读写
+// readi, writei 等函数, 涉及 inode、目的地址、偏移量等参数
+// writei 读写数据块时，每次都可以从任意的位置读写数据块，不存在只能从哪里开始读写的限制
+// 而用户态的单个线程每一次的文件读写之间, 需要
+// * 记录上一次访问到文件的什么位置, 决定下一次从什么位置开始
+// * 是否允许读写该文件
+// 所以在 fs 的使用基础上, 用户线程在多次使用 fs 期间需要维持一些状态. 
+// 访问 fs 的同时也要更新这些状态
+// 
+// 无论设备, 管道, inode的具体性质如何
+// 对于使用来说, 只需要选择它们共同的读写特性
+// 所以对不同 IO , 可以用相同的读写抽象
+// 
+// file descriptor 结合以上两点
+// 在用户态线程和文件系统之间, 提供接口
+// 用户态线程通过 file descriptor 读写 IO 设备上的内容
 
 #include "types.h"
 #include "riscv.h"
@@ -132,6 +148,11 @@ fileread(struct file *f, uint64 addr, int n)
 
 // Write to file f.
 // addr is a user virtual address.
+// 
+// 对文件涉及数据块读写的期间，时刻可能发生对 inode 的更新。
+// 写数据块 writei 时如果扩展了文件的数据块数量，就要写 inode->size
+// 所以访问 inode 的临界区范围（ilock(), iunlock(), iput()的范围）
+// 应该从首次读写文件数据块开始，直到所有对文件的读写结束
 int
 filewrite(struct file *f, uint64 addr, int n)
 {

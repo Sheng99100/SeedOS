@@ -143,7 +143,9 @@ begin_op(void)
 
 // called at the end of each FS system call.
 // commits if this was the last outstanding operation.
-void
+// 在 end_op() 前应该释放事务中写过的 buf
+// 因为 end_op() 后续要把更新过的 buf 写（提交）到磁盘的 logged data block 区域
+// 用于崩溃时恢复
 end_op(void)
 {
   int do_commit = 0;
@@ -190,6 +192,15 @@ write_log(void)
   }
 }
 
+// 多个线程并发开始事务，要保证的同步有
+//  * logheader 是全局共享的数据，要保证多个线程在事务内对 log.header 的更新是同步的
+//    log.lock 保证了多个线程在事务期间对 log.header 的同步
+//  * commit 执行期间，其他线程不能还在事务内更新 log.header. 
+//    把更新的块写到磁盘的这个期间，要保证 log.header 是不变的
+//    一旦开始写磁盘，就不能有线程进入事务了
+//    begin_op, end_op 通过检查 outstanding、comitting，和 log.lock 保证
+//  * commit 要读写磁盘块，线程对磁盘块的读写要同步
+//    由 bread() brelse() (buf.lock) 保证
 static void
 commit()
 {

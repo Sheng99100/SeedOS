@@ -242,6 +242,12 @@ bad:
   return -1;
 }
 
+
+// 创建文件或目录
+// 返回已获得锁的 inode
+// create 必须在事务内被调用
+// 但 create 不是以最顶层抽象为基础的逻辑，所以不由自己开始事务
+// open 使用 create，事务在 open 内开始
 static struct inode*
 create(char *path, short type, short major, short minor)
 {
@@ -253,6 +259,8 @@ create(char *path, short type, short major, short minor)
 
   ilock(dp);
 
+  // 如果要创建的文件/目录已经存在
+  // 直接返回 ip
   if((ip = dirlookup(dp, name, 0)) != 0){
     iunlockput(dp);
     ilock(ip);
@@ -262,26 +270,36 @@ create(char *path, short type, short major, short minor)
     return 0;
   }
 
+  // 如果要创建的文件不存在，就分配一个 inode
+  // 如果 inode 分配失败
   if((ip = ialloc(dp->dev, type)) == 0){
     iunlockput(dp);
     return 0;
   }
 
+  // inode 分配成功
+  // 如果之后的任意过程失败，就 goto fail，撤销以下的修改
   ilock(ip);
   ip->major = major;
   ip->minor = minor;
   ip->nlink = 1;
   iupdate(ip);
 
-  if(type == T_DIR){  // Create . and .. entries.
+  // 如果要创建一个目录
+  // 就为新创建的目录写入 (".", ip->inum) 和 ("..", dp->inum) 两个表项
+  // dp 是 ip 所在目录，即 ip 内目录项的父目录
+  if(type == T_DIR){  // Create "." and ".." entries.
     // No ip->nlink++ for ".": avoid cyclic ref count.
     if(dirlink(ip, ".", ip->inum) < 0 || dirlink(ip, "..", dp->inum) < 0)
       goto fail;
   }
 
+  // 在新目录的父目录为新目录增加目录项:（从path获取的新目录名，新目录的 inode->inum）
   if(dirlink(dp, name, ip->inum) < 0)
     goto fail;
 
+  // 新目录的父目录被新目录下的 ".." 目录项引用了
+  // 需要增加父目录的 nlink
   if(type == T_DIR){
     // now that success is guaranteed:
     dp->nlink++;  // for ".."
@@ -294,6 +312,8 @@ create(char *path, short type, short major, short minor)
 
  fail:
   // something went wrong. de-allocate ip.
+  // 如果失败，就让新 ip->nlink = 0
+  // 这样 iput() 就会解除该 inode 缓存、inode（在所在磁盘块（缓存）内）、数据块的分配，
   ip->nlink = 0;
   iupdate(ip);
   iunlockput(ip);
@@ -328,7 +348,7 @@ sys_open(void)
       return -1;
     }
     ilock(ip);
-    if(ip->type == T_DIR && omode != O_RDONLY){
+    if(ip->type == T_DIR && omode != O_RDONLY){ // 目录只能以只读模式打开
       iunlockput(ip);
       end_op();
       return -1;

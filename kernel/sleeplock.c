@@ -19,7 +19,7 @@ initsleeplock(struct sleeplock *lk, char *name)
 }
 
 
-  // 用了 acquire 以自旋的方式互斥，怎么能说利用放弃 CPU 来等待呢？
+  // sleeplock 用了 acquire 以自旋的方式互斥，怎么能说利用放弃 CPU 来等待呢？
   // 这是因为，acquire 并不是锁 acquiresleep 外部的临界区
   // 只是锁 acquiresleep 内部对 sleep->locked 的并发访问
   // acquiresleep 要锁的外部的临界区还是用 sleep 来实现互斥
@@ -27,8 +27,8 @@ initsleeplock(struct sleeplock *lk, char *name)
   // 仅仅只说明了当前没有线程正在 [访问] sleeplock->locked 而已
   // 1. spinlock 的 acquire 获得 sleeplock->locked 的访问权。考虑两种情况
   //   a. sleeplock 被持有，则 sleep；sleep() 释放 spinlock
-  //   b. sleeplock 没被持有. 则 sleepacquire() 获得锁. 
-  //      sleepacquire() 函数结束就能释放 spinlock 
+  //   b. sleeplock 没被持有. 则 acquiresleep() 获得锁. 
+  //      acquiresleep() 函数结束就能释放 spinlock 
   // 2. spinlock 的 acquire 没有获得 sleeplock->locked 的访问权
   //    根据 1. 可得，sleepacquire() 无论如何都会马上释放 spinlock
   //    所以也只需要 spin 一小会. 自旋之后能马上释放锁，又符合 1. 的情况  
