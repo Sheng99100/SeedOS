@@ -1,8 +1,18 @@
-### What is SeedOS 
+## SeedOS 
 
 ***SeedOS*** is an operating system for learning,  base on ***Xv6*** for RISC-V 
 
-The runtime environment and installation process for SeedOS are identical to those of xv6.
+
+
+## Latest Updates  
+
+### 2024-11-25
+
+- **[Improvement]** Enhanced process switching: inter-process switching no longer relies on third-party threads, ensuring a more streamlined and efficient context-switching mechanism.
+
+
+
+## Xv6
 
 > xv6 is a re-implementation of Dennis Ritchie's and Ken Thompson's Unix
 > Version 6 (v6).  xv6 loosely follows the structure and style of v6,
@@ -50,9 +60,3 @@ The runtime environment and installation process for SeedOS are identical to tho
 > https://github.com/riscv/riscv-gnu-toolchain, and qemu compiled for
 > riscv64-softmmu.  Once they are installed, and in your shell
 > search path, you can run "make qemu".
-
-
-
-## Latest Updates  
-### 2024-11-25
-- **[Improvement]** Enhanced process switching: inter-process switching no longer relies on third-party threads, ensuring a more streamlined and efficient context-switching mechanism.
