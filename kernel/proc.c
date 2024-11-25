@@ -393,6 +393,7 @@ wait(uint64 addr)
   struct proc *pp;
   int havekids, pid;
   struct proc *p = myproc();
+  struct proc *zombie_p = 0;
 
   acquire(&wait_lock);
 
@@ -406,18 +407,23 @@ wait(uint64 addr)
 
         havekids = 1;
         if(pp->state == ZOMBIE){
-          // Found one.
-          pid = pp->pid;
-          if(addr != 0 && copyout(p->pagetable, addr, (char *)&pp->xstate,
-                                  sizeof(pp->xstate)) < 0) {
+          if (pp->scheduling == 0){
+            // Found one.
+            pid = pp->pid;
+            if (addr != 0 && copyout(p->pagetable, addr, (char *)&pp->xstate,
+                                     sizeof(pp->xstate)) < 0)
+            {
+              release(&pp->lock);
+              release(&wait_lock);
+              return -1;
+            }
+            freeproc(pp);
             release(&pp->lock);
             release(&wait_lock);
-            return -1;
+            return pid;
+          }else {
+            zombie_p = pp;
           }
-          freeproc(pp);
-          release(&pp->lock);
-          release(&wait_lock);
-          return pid;
         }
         release(&pp->lock);
       }
@@ -428,9 +434,51 @@ wait(uint64 addr)
       release(&wait_lock);
       return -1;
     }
-    
-    // Wait for a child to exit.
-    sleep(p, &wait_lock);  //DOC: wait-sleep
+
+    if (zombie_p != 0){
+      release(&wait_lock);
+      return zombie_p->pid;
+    }else{
+      // Wait for a child to exit.
+      sleep(p, &wait_lock); // DOC: wait-sleep
+    }
+  }
+}
+
+void new_scheduler(void) {
+  struct proc *old_p = myproc();
+  struct proc *p = proc;
+  struct cpu *c = mycpu();
+  int found = 0;
+
+  c->proc = 0;
+  c->last_proc = old_p;
+
+  if (old_p != 0) {
+    p = old_p + 1;
+    old_p->scheduling = 1;
+    release(&old_p->lock);
+  }
+
+  for (;;) {
+    intr_on();
+    for (; p < &proc[NPROC]; p++) {
+      acquire(&p->lock);
+      if ((p->scheduling == 0 || p == old_p) && p->state == RUNNABLE) {
+        p->state = RUNNING;
+        c->proc = p;
+        found = 1;
+        break;
+      }
+      release(&p->lock);
+    }
+    if (found == 1) {
+      if (old_p != 0) swtch(&old_p->context, &p->context);
+      else swtch(&c->context, &p->context);
+      return;
+    }else if (found == 0) {
+      p = proc;
+    }
   }
 }
 
@@ -512,10 +560,21 @@ void
 yield(void)
 {
   struct proc *p = myproc();
+  struct cpu *c = mycpu();
+
   acquire(&p->lock);
   p->state = RUNNABLE;
   sched();
   release(&p->lock);
+
+  if (c->last_proc != 0){
+    c->last_proc->scheduling = 0;
+    acquire(&wait_lock);
+    if (c->last_proc->state == ZOMBIE){
+      freeproc(c->last_proc);
+    }
+    release(&wait_lock);
+  }
 }
 
 // A fork child's very first scheduling by scheduler()
@@ -524,9 +583,21 @@ void
 forkret(void)
 {
   static int first = 1;
+  struct cpu *c = mycpu();
 
   // Still holding p->lock from scheduler.
   release(&myproc()->lock);
+
+  if (c->last_proc != 0)
+  {
+    c->last_proc->scheduling = 0;
+    acquire(&wait_lock);
+    if (c->last_proc->state == ZOMBIE)
+    {
+      freeproc(c->last_proc);
+    }
+    release(&wait_lock);
+  }
 
   if (first) {
     // File system initialization must be run in the context of a
@@ -548,7 +619,8 @@ void
 sleep(void *chan, struct spinlock *lk)
 {
   struct proc *p = myproc();
-  
+  struct cpu *c = mycpu();
+
   // Must acquire p->lock in order to
   // change p->state and then call sched.
   // Once we hold p->lock, we can be
@@ -567,6 +639,17 @@ sleep(void *chan, struct spinlock *lk)
 
   // Tidy up.
   p->chan = 0;
+
+  if (c->last_proc != 0)
+  {
+    c->last_proc->scheduling = 0;
+    acquire(&wait_lock);
+    if (c->last_proc->state == ZOMBIE)
+    {
+      freeproc(c->last_proc);
+    }
+    release(&wait_lock);
+  }
 
   // Reacquire original lock.
   release(&p->lock);
