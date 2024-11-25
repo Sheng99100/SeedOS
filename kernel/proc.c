@@ -473,8 +473,11 @@ void new_scheduler(void) {
       release(&p->lock);
     }
     if (found == 1) {
-      if (old_p != 0) swtch(&old_p->context, &p->context);
-      else swtch(&c->context, &p->context);
+      if (old_p != 0){
+        swtch(&old_p->context, &p->context);
+      }else {
+         swtch(&c->context, &p->context);
+      }
       return;
     }else if (found == 0) {
       p = proc;
@@ -551,7 +554,7 @@ sched(void)
     panic("sched interruptible");
 
   intena = mycpu()->intena;
-  swtch(&p->context, &mycpu()->context);
+  new_scheduler();
   mycpu()->intena = intena;
 }
 
@@ -567,13 +570,16 @@ yield(void)
   sched();
   release(&p->lock);
 
+  c = mycpu();
   if (c->last_proc != 0){
     c->last_proc->scheduling = 0;
-    acquire(&wait_lock);
-    if (c->last_proc->state == ZOMBIE){
+    if(c->last_proc->state == ZOMBIE && p != c->last_proc) {
       freeproc(c->last_proc);
+    }else if(c->last_proc->state == ZOMBIE) {
+      acquire(&c->last_proc->lock);
+      freeproc(c->last_proc);
+      release(&c->last_proc->lock);
     }
-    release(&wait_lock);
   }
 }
 
@@ -584,19 +590,21 @@ forkret(void)
 {
   static int first = 1;
   struct cpu *c = mycpu();
+  struct proc *p = myproc();
 
   // Still holding p->lock from scheduler.
   release(&myproc()->lock);
 
-  if (c->last_proc != 0)
-  {
+  c = mycpu();
+  if (c->last_proc != 0){
     c->last_proc->scheduling = 0;
-    acquire(&wait_lock);
-    if (c->last_proc->state == ZOMBIE)
-    {
+    if(c->last_proc->state == ZOMBIE && p != c->last_proc) {
       freeproc(c->last_proc);
+    }else if(c->last_proc->state == ZOMBIE) {
+      acquire(&c->last_proc->lock);
+      freeproc(c->last_proc);
+      release(&c->last_proc->lock);
     }
-    release(&wait_lock);
   }
 
   if (first) {
@@ -640,17 +648,17 @@ sleep(void *chan, struct spinlock *lk)
   // Tidy up.
   p->chan = 0;
 
-  if (c->last_proc != 0)
-  {
+  c = mycpu();
+  if (c->last_proc != 0){
     c->last_proc->scheduling = 0;
-    acquire(&wait_lock);
-    if (c->last_proc->state == ZOMBIE)
-    {
+    if(c->last_proc->state == ZOMBIE && p != c->last_proc) {
       freeproc(c->last_proc);
+    }else if(c->last_proc->state == ZOMBIE) {
+      acquire(&c->last_proc->lock);
+      freeproc(c->last_proc);
+      release(&c->last_proc->lock);
     }
-    release(&wait_lock);
   }
-
   // Reacquire original lock.
   release(&p->lock);
   acquire(lk);
